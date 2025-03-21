@@ -444,7 +444,7 @@ ethereum 对于已经进入pending队列的交易具有一定的规则才能替�
 
 
 ethereum共识层在进行共识的时候,"矿工"需要在pending队列里面组装区块并发送到共识层中,之前我们讲到共识层一般与geth进行了解耦,
-在ethereum geth中通过jwt形式的可信rpc与共识层通,geth中核心注册共识层client如下:
+在ethereum geth中通过jwt形式的可信rpc与共识层通信,geth中核心注册共识层client如下:
 
 
 ```go
@@ -479,4 +479,229 @@ if ctx.IsSet(utils.DeveloperFlag.Name) {
 从简单的角度来讲,geth与共识层必须有下面几处交流:
 1. 共识层达成的最新共识应该通知给geth,geth需要根据此状态来对底层存储状态进行变更。
 2. geth应该向共识层提供矿工制作好的最新区块以便进行共识。
-3. 
+
+在geth(后续我们称为执行层)与共识层的交互中,主要有四个方法:
++ engine_exchangeCapabilities：用于交换各个客户端支持的Engine API方法。
++ engine_forkchoiceUpdated：更新执行层客户端的分叉选择。还用于启动有效负载构建过程。
++ engine_getPayload：用于检索execution_payload过去engine_forkchoiceUpdatedV2调用中启动的构建过程。
++ engine_newPayload：共识层客户端用来向execution_payload执行层客户端发送一个，以供其验证。
+
+> 这四个方法有可能有不同版本,例如engine_newPayloadV2,engine_newPayloadV1,与ethereum改进相关,这里不做过多赘述。
+::: mermaid
+sequenceDiagram
+    participant CL
+    participant EL
+
+    Note over CL,EL: 节点启动
+    CL->>EL: engine_exchangeCapabilities(CL支持的引擎方法)
+    EL-->>CL: EL支持的引擎方法
+
+    CL->>EL: engine_forkchoiceUpdated(ForkchoiceState, null)
+    Note right of EL: 缺少必要数据，同步中
+    EL-->>CL: {payloadStatus: {status: 同步中, ...}, payloadId: null}
+    Note over CL,EL: ...（持续同步过程）...
+
+    Note right of EL: 同步完成
+    CL->>EL: engine_forkchoiceUpdated(ForkchoiceState, null)
+    EL-->>CL: {payloadStatus: {status: 有效, ...}, payloadId: null}
+
+    Note over CL,EL: 验证者无需提议的时段开始
+    CL->>EL: engine_forkchoiceUpdated(ForkchoiceState, null)
+    EL-->>CL: {payloadStatus: {status: 有效, ...}, payloadId: null}
+
+    Note over CL: 接收到新区块
+    Note over CL: 从区块中提取执行负载（ExecutionPayload）
+    CL->>EL: engine_newPayload(ExecutionPayload)
+    Note right of EL: 满足所有要求，负载被视为有效
+    EL-->>CL: {status: 有效, ...}
+
+    CL->>EL: engine_forkchoiceUpdated(ForkchoiceState, PayloadAttributes)
+    EL-->>CL: {payloadStatus: {status: 有效, ...}, payloadId: 构建进程ID}
+    Note right of EL: 开始构建执行负载（execution_payload）
+
+    Note over CL,EL: 验证者无需提议的时段结束
+    Note over CL,EL: 验证者需要提议的时段开始
+
+    CL->>EL: engine_forkchoiceUpdated(ForkchoiceState, null)
+    EL-->>CL: {payloadStatus: {status: 有效, ...}, payloadId: null}
+
+    Note over CL: 填充信标区块至执行负载部分
+    CL->>EL: engine_getPayload(PayloadId)
+    EL-->>CL: {executionPayload, blockValue}
+    
+    Note over CL: 将执行负载加入信标区块
+    Note over CL: 计算状态根（state_root）
+    Note over CL: 传播区块
+    
+    Note over CL,EL: 验证者需要提议的时段结束
+    Note over CL,EL: 节点将持续经历两种时段直到关闭
+
+:::
+
+从上面的流程图中可以看见,当共识层发送engine_forkchoiceUpdated向执行层请求一个payload以用作预备区块,从之前的分析结果可以推测，执行层通过engine_forkchoiceUpdated将pending交易池里面的交易打包成区块以便共识层进行下一步分析。这里我们使用V3版本进行分析
+
+
+```go
+// ForkchoiceUpdatedV3 is equivalent to V2 with the addition of parent beacon block root
+// in the payload attributes. It supports only PayloadAttributesV3.
+func (api *ConsensusAPI) ForkchoiceUpdatedV3(update engine.ForkchoiceStateV1, params *engine.PayloadAttributes) (engine.ForkChoiceResponse, error) {
+	if params != nil {
+        //eip7002
+		if params.Withdrawals == nil {
+			return engine.STATUS_INVALID, engine.InvalidPayloadAttributes.With(errors.New("missing withdrawals"))
+		}
+        //信标链的状态根是否存在，遵循EIP4788,在EIP4788之前通过中继器的方式实现。
+		if params.BeaconRoot == nil {
+			return engine.STATUS_INVALID, engine.InvalidPayloadAttributes.With(errors.New("missing beacon root"))
+		}
+		if api.eth.BlockChain().Config().LatestFork(params.Timestamp) != forks.Cancun && api.eth.BlockChain().Config().LatestFork(params.Timestamp) != forks.Prague {
+			return engine.STATUS_INVALID, engine.UnsupportedFork.With(errors.New("forkchoiceUpdatedV3 must only be called for cancun payloads"))
+		}
+	}
+	// TODO(matt): the spec requires that fcu is applied when called on a valid
+	// hash, even if params are wrong. To do this we need to split up
+	// forkchoiceUpdate into a function that only updates the head and then a
+	// function that kicks off block construction.
+	return api.forkchoiceUpdated(update, params, engine.PayloadV3, false)
+}
+
+
+func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payloadAttributes *engine.PayloadAttributes, payloadVersion engine.PayloadVersion, payloadWitness bool) (engine.ForkChoiceResponse, error) {
+	api.forkchoiceLock.Lock()
+	defer api.forkchoiceLock.Unlock()
+
+	block := api.eth.BlockChain().GetBlockByHash(update.HeadBlockHash)
+    //如果
+	if block == nil {
+		// If this block was previously invalidated, keep rejecting it here too
+		if res := api.checkInvalidAncestor(update.HeadBlockHash, update.HeadBlockHash); res != nil {
+			return engine.ForkChoiceResponse{PayloadStatus: *res, PayloadID: nil}, nil
+		}
+		// If the head hash is unknown (was not given to us in a newPayload request),
+		// we cannot resolve the header, so not much to do. This could be extended in
+		// the future to resolve from the `eth` network, but it's an unexpected case
+		// that should be fixed, not papered over.
+		header := api.remoteBlocks.get(update.HeadBlockHash)
+		if header == nil {
+			log.Warn("Forkchoice requested unknown head", "hash", update.HeadBlockHash)
+			return engine.STATUS_SYNCING, nil
+		}
+		// If the finalized hash is known, we can direct the downloader to move
+		// potentially more data to the freezer from the get go.
+		finalized := api.remoteBlocks.get(update.FinalizedBlockHash)
+
+		// Header advertised via a past newPayload request. Start syncing to it.
+		context := []interface{}{"number", header.Number, "hash", header.Hash()}
+		if update.FinalizedBlockHash != (common.Hash{}) {
+			if finalized == nil {
+				context = append(context, []interface{}{"finalized", "unknown"}...)
+			} else {
+				context = append(context, []interface{}{"finalized", finalized.Number}...)
+			}
+		}
+		log.Info("Forkchoice requested sync to new head", context...)
+		if err := api.eth.Downloader().BeaconSync(api.eth.SyncMode(), header, finalized); err != nil {
+			return engine.STATUS_SYNCING, err
+		}
+		return engine.STATUS_SYNCING, nil
+	}
+	// Block is known locally, just sanity check that the beacon client does not
+	// attempt to push us back to before the merge.
+	if block.Difficulty().BitLen() > 0 || block.NumberU64() == 0 {
+		var (
+			td  = api.eth.BlockChain().GetTd(update.HeadBlockHash, block.NumberU64())
+			ptd = api.eth.BlockChain().GetTd(block.ParentHash(), block.NumberU64()-1)
+			ttd = api.eth.BlockChain().Config().TerminalTotalDifficulty
+		)
+		if td == nil || (block.NumberU64() > 0 && ptd == nil) {
+			log.Error("TDs unavailable for TTD check", "number", block.NumberU64(), "hash", update.HeadBlockHash, "td", td, "parent", block.ParentHash(), "ptd", ptd)
+			return engine.STATUS_INVALID, errors.New("TDs unavailable for TDD check")
+		}
+		if td.Cmp(ttd) < 0 {
+			log.Error("Refusing beacon update to pre-merge", "number", block.NumberU64(), "hash", update.HeadBlockHash, "diff", block.Difficulty(), "age", common.PrettyAge(time.Unix(int64(block.Time()), 0)))
+			return engine.ForkChoiceResponse{PayloadStatus: engine.INVALID_TERMINAL_BLOCK, PayloadID: nil}, nil
+		}
+		if block.NumberU64() > 0 && ptd.Cmp(ttd) >= 0 {
+			log.Error("Parent block is already post-ttd", "number", block.NumberU64(), "hash", update.HeadBlockHash, "diff", block.Difficulty(), "age", common.PrettyAge(time.Unix(int64(block.Time()), 0)))
+			return engine.ForkChoiceResponse{PayloadStatus: engine.INVALID_TERMINAL_BLOCK, PayloadID: nil}, nil
+		}
+	}
+	valid := func(id *engine.PayloadID) engine.ForkChoiceResponse {
+		return engine.ForkChoiceResponse{
+			PayloadStatus: engine.PayloadStatusV1{Status: engine.VALID, LatestValidHash: &update.HeadBlockHash},
+			PayloadID:     id,
+		}
+	}
+	if rawdb.ReadCanonicalHash(api.eth.ChainDb(), block.NumberU64()) != update.HeadBlockHash {
+		// Block is not canonical, set head.
+		if latestValid, err := api.eth.BlockChain().SetCanonical(block); err != nil {
+			return engine.ForkChoiceResponse{PayloadStatus: engine.PayloadStatusV1{Status: engine.INVALID, LatestValidHash: &latestValid}}, err
+		}
+	} else if api.eth.BlockChain().CurrentBlock().Hash() == update.HeadBlockHash {
+		// If the specified head matches with our local head, do nothing and keep
+		// generating the payload. It's a special corner case that a few slots are
+		// missing and we are requested to generate the payload in slot.
+	} else {
+		// If the head block is already in our canonical chain, the beacon client is
+		// probably resyncing. Ignore the update.
+		log.Info("Ignoring beacon update to old head", "number", block.NumberU64(), "hash", update.HeadBlockHash, "age", common.PrettyAge(time.Unix(int64(block.Time()), 0)), "have", api.eth.BlockChain().CurrentBlock().Number)
+		return valid(nil), nil
+	}
+	api.eth.SetSynced()
+
+	// 更新finalized block的状态
+	if update.FinalizedBlockHash != (common.Hash{}) {
+		// If the finalized block is not in our canonical tree, something is wrong
+		finalBlock := api.eth.BlockChain().GetBlockByHash(update.FinalizedBlockHash)
+		if finalBlock == nil {
+			log.Warn("Final block not available in database", "hash", update.FinalizedBlockHash)
+			return engine.STATUS_INVALID, engine.InvalidForkChoiceState.With(errors.New("final block not available in database"))
+		} else if rawdb.ReadCanonicalHash(api.eth.ChainDb(), finalBlock.NumberU64()) != update.FinalizedBlockHash {
+			log.Warn("Final block not in canonical chain", "number", finalBlock.NumberU64(), "hash", update.FinalizedBlockHash)
+			return engine.STATUS_INVALID, engine.InvalidForkChoiceState.With(errors.New("final block not in canonical chain"))
+		}
+		// Set the finalized block
+		api.eth.BlockChain().SetFinalized(finalBlock.Header())
+	}
+	// 更新safe block的状态
+	if update.SafeBlockHash != (common.Hash{}) {
+		safeBlock := api.eth.BlockChain().GetBlockByHash(update.SafeBlockHash)
+		if safeBlock == nil {
+			log.Warn("Safe block not available in database")
+			return engine.STATUS_INVALID, engine.InvalidForkChoiceState.With(errors.New("safe block not available in database"))
+		}
+		if rawdb.ReadCanonicalHash(api.eth.ChainDb(), safeBlock.NumberU64()) != update.SafeBlockHash {
+			log.Warn("Safe block not in canonical chain")
+			return engine.STATUS_INVALID, engine.InvalidForkChoiceState.With(errors.New("safe block not in canonical chain"))
+		}
+		// Set the safe block
+		api.eth.BlockChain().SetSafe(safeBlock.Header())
+	}
+
+    //这里对应当ethereum full node通过pos算法获取出块权利,那么会判断是否执行层已经具有最新区块的前提下通过执行层产生
+    //构建区块所需要的交易
+	if payloadAttributes != nil {
+        //这里需要注意的是,在ethereum中,提取通过质押eth来参与共识的流程可能会比较复杂，虽然后期
+        //ethereum通过在执行层通过evm去进行处理,但是显而易见的是,这有点区别于ethereum传统的智能合约。
+        //因为这由系统操作,用户并不可见
+		args := &miner.BuildPayloadArgs{
+			Parent:       update.HeadBlockHash,
+			Timestamp:    payloadAttributes.Timestamp,
+			FeeRecipient: payloadAttributes.SuggestedFeeRecipient,
+			Random:       payloadAttributes.Random,
+			Withdrawals:  payloadAttributes.Withdrawals,
+			BeaconRoot:   payloadAttributes.BeaconRoot,
+			Version:      payloadVersion,
+		}
+		id := args.Id()
+		// If we already are busy generating this work, then we do not need
+		// to start a second process.
+		if api.localBlocks.has(id) {
+			return valid(&id), nil
+		}
+        //构建共识层需要的payload
+		payload, err := api.eth.Miner().BuildPayload(args, payloadWitness)
+}
+
+```
+
