@@ -487,7 +487,7 @@ if ctx.IsSet(utils.DeveloperFlag.Name) {
 + engine_newPayload：共识层客户端用来向execution_payload执行层客户端发送一个，以供其验证。
 
 > 这四个方法有可能有不同版本,例如engine_newPayloadV2,engine_newPayloadV1,与ethereum改进相关,这里不做过多赘述。
-::: mermaid
+```mermaid
 sequenceDiagram
     participant CL
     participant EL
@@ -536,7 +536,7 @@ sequenceDiagram
     Note over CL,EL: 验证者需要提议的时段结束
     Note over CL,EL: 节点将持续经历两种时段直到关闭
 
-:::
+```
 
 从上面的流程图中可以看见,当共识层发送engine_forkchoiceUpdated向执行层请求一个payload以用作预备区块,从之前的分析结果可以推测，执行层通过engine_forkchoiceUpdated将pending交易池里面的交易打包成区块以便共识层进行下一步分析。这里我们使用V3版本进行分析
 
