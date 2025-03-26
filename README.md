@@ -1,8 +1,8 @@
 # 🔥 You Know , For Web3 
 
 <p align="center">
-  <img src="https://img.shields.io/github/stars/0xdoomxy/web3?style=for-the-badge&logo=appveyor&color=success"> 
-  <img src="https://img.shields.io/badge/Solidity-3.0+-brightgreen?style=for-the-badge">
+ <img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/0xdoomxy/web3">
+  <img alt="GitHub License" src="https://img.shields.io/github/license/0xdoomxy/web3">
 </p>
 
 **硬核技术实践场 | 智能合约军火库 | Web3 开发流水线**  
