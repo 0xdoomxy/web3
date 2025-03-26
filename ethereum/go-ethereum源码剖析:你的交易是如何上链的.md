@@ -521,9 +521,9 @@ func (api *ConsensusAPI) ForkchoiceUpdatedV3(update engine.ForkchoiceStateV1, pa
 func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payloadAttributes *engine.PayloadAttributes, payloadVersion engine.PayloadVersion, payloadWitness bool) (engine.ForkChoiceResponse, error) {
 	api.forkchoiceLock.Lock()
 	defer api.forkchoiceLock.Unlock()
-
+	//通过共识层获取到的最新状态来判断当前执行层是否需要同步区块
 	block := api.eth.BlockChain().GetBlockByHash(update.HeadBlockHash)
-
+	//如果当前共识层发过来的head区块不存在于执行层中，那么可能是因为当前执行层还未执行刚从p2p节点获取到的区块信息，或者这个区块不满足最长链原则
 	if block == nil {
 		if res := api.checkInvalidAncestor(update.HeadBlockHash, update.HeadBlockHash); res != nil {
 			return engine.ForkChoiceResponse{PayloadStatus: *res, PayloadID: nil}, nil
@@ -548,6 +548,7 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 		}
 		return engine.STATUS_SYNCING, nil
 	}
+	//通过ttd判断当前的区块链的共识是处于pow还是pos
 	if block.Difficulty().BitLen() > 0 || block.NumberU64() == 0 {
 		var (
 			td  = api.eth.BlockChain().GetTd(update.HeadBlockHash, block.NumberU64())
@@ -562,6 +563,7 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 			log.Error("Refusing beacon update to pre-merge", "number", block.NumberU64(), "hash", update.HeadBlockHash, "diff", block.Difficulty(), "age", common.PrettyAge(time.Unix(int64(block.Time()), 0)))
 			return engine.ForkChoiceResponse{PayloadStatus: engine.INVALID_TERMINAL_BLOCK, PayloadID: nil}, nil
 		}
+
 		if block.NumberU64() > 0 && ptd.Cmp(ttd) >= 0 {
 			log.Error("Parent block is already post-ttd", "number", block.NumberU64(), "hash", update.HeadBlockHash, "diff", block.Difficulty(), "age", common.PrettyAge(time.Unix(int64(block.Time()), 0)))
 			return engine.ForkChoiceResponse{PayloadStatus: engine.INVALID_TERMINAL_BLOCK, PayloadID: nil}, nil
@@ -573,8 +575,8 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 			PayloadID:     id,
 		}
 	}
+	//如果当前的head与执行层的head hash不同，那么以执行层的head为主
 	if rawdb.ReadCanonicalHash(api.eth.ChainDb(), block.NumberU64()) != update.HeadBlockHash {
-		// Block is not canonical, set head.
 		if latestValid, err := api.eth.BlockChain().SetCanonical(block); err != nil {
 			return engine.ForkChoiceResponse{PayloadStatus: engine.PayloadStatusV1{Status: engine.INVALID, LatestValidHash: &latestValid}}, err
 		}
@@ -583,6 +585,7 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 		log.Info("Ignoring beacon update to old head", "number", block.NumberU64(), "hash", update.HeadBlockHash, "age", common.PrettyAge(time.Unix(int64(block.Time()), 0)), "have", api.eth.BlockChain().CurrentBlock().Number)
 		return valid(nil), nil
 	}
+	//输出日志:当前的区块已经同步到最新，没有实际用处
 	api.eth.SetSynced()
 
 	// 更新finalized block的状态
@@ -635,6 +638,7 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 		}
         //构建共识层需要的payload
 		payload, err := api.eth.Miner().BuildPayload(args, payloadWitness)
+}
 }
 
 // BuildPayload builds the payload according to the provided parameters.
@@ -809,7 +813,7 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 		Number:     new(big.Int).Add(parent.Number, common.Big1),
 		//初始化当前的区块链的gas limit，这里的gas limit通过上一个区块的gas limit动态调整，最多的震动幅度不能超过上一个gas limit/1024
 		//同时最终的gas limit不能超过矿工协定的gas_ceil,为30_000_000
-		//在tip1559之后，gas 的费用通过上一个区块的gas_used和gas_target进行动态调整。
+		//在eip1559之后，gas 的费用通过上一个区块的gas_used和gas_target进行动态调整。
 		//目的是为了通过调整gas target来动态调控base fee
 		//在eip1559之后，gas的上限由区块链当前的市场状态进行动态扩容，
 		//这可以防止最初矿工通过手动设置gas limit来损失网络的公平性和短期获利，通过反应当前市场的真实情况来动态调控gas basefee
@@ -918,7 +922,7 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) 
 		}
 	}
 	// 打包本地blob 和legacy池的交易
-	//此处返回的blobTxs和localPlainsTxs是进行了堆排序的，通过优先级费用和交易发起时间来进行排序，这点应该没有意义，符合eip1557，矿工优先打包高服务费的交易
+	//此处返回的blobTxs和localPlainsTxs是进行了堆排序的，通过优先级费用和交易发起时间来进行排序，这点应该没有异议，符合eip1557，矿工优先打包高服务费的交易
 	if len(localPlainTxs) > 0 || len(localBlobTxs) > 0 {
 		plainTxs := newTransactionsByPriceAndNonce(env.signer, localPlainTxs, env.header.BaseFee)
 		blobTxs := newTransactionsByPriceAndNonce(env.signer, localBlobTxs, env.header.BaseFee)
@@ -949,8 +953,15 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) 
 
 上述源码涉及到的EIP协议如下
 
++ EIP-155 (链重放保护):将chain id 添加到交易签名中
+
++ EIP-2930 (访问列表):通过预声明存储访问路径优化 Gas 计算
+
 + EIP-1559:重构 Gas 费用市场，引入基础费用（Base Fee）动态调整机制，销毁部分交易费用，优化网络拥堵管理。
 
++ EIP-2028 (Calldata Gas 优化):降低 Calldata 每字节 Gas 消耗
+
++ EIP-3860 (合约初始化限制):限制合约初始化代码长度（≤24576字节）
 + EIP-2935:通过历史存储合约（预编译合约）保存超过 256 个区块的历史哈希，解决 BLOCKHASH 操作码的访问限制。
 
 + EIP-4399:重新定义区块头 MixDigest 字段为信标链提供的随机数（RANDAO + VDF），支持协议层随机性需求。
