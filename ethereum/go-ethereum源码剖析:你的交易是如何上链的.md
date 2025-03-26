@@ -489,52 +489,52 @@ if ctx.IsSet(utils.DeveloperFlag.Name) {
 > 这四个方法有可能有不同版本,例如engine_newPayloadV2,engine_newPayloadV1,与ethereum改进相关,这里不做过多赘述。
 ```mermaid
 sequenceDiagram
-    participant CL
-    participant EL
+    participant 共识层
+    participant 执行层
 
-    Note over CL,EL: 节点启动
-    CL->>EL: engine_exchangeCapabilities(CL支持的引擎方法)
-    EL-->>CL: EL支持的引擎方法
+    Note over 共识层,执行层: 节点启动
+    共识层->>执行层: engine_exchangeCapabilities(CL支持的引擎方法)
+    执行层-->>共识层: 执行层支持的引擎方法
 
-    CL->>EL: engine_forkchoiceUpdated(ForkchoiceState, null)
-    Note right of EL: 缺少必要数据，同步中
-    EL-->>CL: {payloadStatus: {status: 同步中, ...}, payloadId: null}
-    Note over CL,EL: ...（持续同步过程）...
+    共识层->>执行层: engine_forkchoiceUpdated(ForkchoiceState, null)
+    Note right of 执行层: 缺少必要数据，同步中
+    执行层-->>共识层: {payloadStatus: {status: 同步中, ...}, payloadId: null}
+    Note over 共识层,执行层: ...（持续同步过程）...
 
-    Note right of EL: 同步完成
-    CL->>EL: engine_forkchoiceUpdated(ForkchoiceState, null)
-    EL-->>CL: {payloadStatus: {status: 有效, ...}, payloadId: null}
+    Note right of 执行层: 同步完成
+    共识层->>执行层: engine_forkchoiceUpdated(ForkchoiceState, null)
+    执行层-->>共识层: {payloadStatus: {status: 有效, ...}, payloadId: null}
 
-    Note over CL,EL: 验证者无需提议的时段开始
-    CL->>EL: engine_forkchoiceUpdated(ForkchoiceState, null)
-    EL-->>CL: {payloadStatus: {status: 有效, ...}, payloadId: null}
+    Note over 共识层,执行层: 验证者无需提议的时段开始
+    共识层->>执行层: engine_forkchoiceUpdated(ForkchoiceState, null)
+    执行层-->>共识层: {payloadStatus: {status: 有效, ...}, payloadId: null}
 
-    Note over CL: 接收到新区块
-    Note over CL: 从区块中提取执行负载（ExecutionPayload）
-    CL->>EL: engine_newPayload(ExecutionPayload)
-    Note right of EL: 满足所有要求，负载被视为有效
-    EL-->>CL: {status: 有效, ...}
+    Note over 共识层: 接收到新区块
+    Note over 共识层: 从区块中提取执行负载（ExecutionPayload）
+    共识层->>执行层: engine_newPayload(ExecutionPayload)
+    Note right of 执行层: 满足所有要求，负载被视为有效
+    执行层-->>共识层: {status: 有效, ...}
 
-    CL->>EL: engine_forkchoiceUpdated(ForkchoiceState, PayloadAttributes)
-    EL-->>CL: {payloadStatus: {status: 有效, ...}, payloadId: 构建进程ID}
-    Note right of EL: 开始构建执行负载（execution_payload）
+    共识层->>执行层: engine_forkchoiceUpdated(ForkchoiceState, PayloadAttributes)
+    执行层-->>共识层: {payloadStatus: {status: 有效, ...}, payloadId: 构建进程ID}
+    Note right of 执行层: 开始构建执行负载（execution_payload）
 
-    Note over CL,EL: 验证者无需提议的时段结束
-    Note over CL,EL: 验证者需要提议的时段开始
+    Note over 共识层,执行层: 验证者无需提议的时段结束
+    Note over 共识层,执行层: 验证者需要提议的时段开始
 
-    CL->>EL: engine_forkchoiceUpdated(ForkchoiceState, null)
-    EL-->>CL: {payloadStatus: {status: 有效, ...}, payloadId: null}
+    共识层->>执行层: engine_forkchoiceUpdated(ForkchoiceState, null)
+    执行层-->>共识层: {payloadStatus: {status: 有效, ...}, payloadId: null}
 
-    Note over CL: 填充信标区块至执行负载部分
-    CL->>EL: engine_getPayload(PayloadId)
-    EL-->>CL: {executionPayload, blockValue}
+    Note over 共识层: 填充信标区块至执行负载部分
+    共识层->>执行层: engine_getPayload(PayloadId)
+    执行层-->>共识层: {executionPayload, blockValue}
     
-    Note over CL: 将执行负载加入信标区块
-    Note over CL: 计算状态根（state_root）
-    Note over CL: 传播区块
+    Note over 共识层: 将执行负载加入信标区块
+    Note over 共识层: 计算状态根（state_root）
+    Note over 共识层: 传播区块
     
-    Note over CL,EL: 验证者需要提议的时段结束
-    Note over CL,EL: 节点将持续经历两种时段直到关闭
+    Note over 共识层,执行层: 验证者需要提议的时段结束
+    Note over 共识层,执行层: 节点将持续经历两种时段直到关闭
 
 ```
 
@@ -550,7 +550,7 @@ func (api *ConsensusAPI) ForkchoiceUpdatedV3(update engine.ForkchoiceStateV1, pa
 		if params.Withdrawals == nil {
 			return engine.STATUS_INVALID, engine.InvalidPayloadAttributes.With(errors.New("missing withdrawals"))
 		}
-        //信标链的状态根是否存在，遵循EIP4788,在EIP4788之前通过中继器的方式实现。
+        //信标链的状态根是否存在，遵循EIP4788,在EIP4788之前通过中继器(chainlink预言机)的方式实现。
 		if params.BeaconRoot == nil {
 			return engine.STATUS_INVALID, engine.InvalidPayloadAttributes.With(errors.New("missing beacon root"))
 		}
@@ -558,10 +558,6 @@ func (api *ConsensusAPI) ForkchoiceUpdatedV3(update engine.ForkchoiceStateV1, pa
 			return engine.STATUS_INVALID, engine.UnsupportedFork.With(errors.New("forkchoiceUpdatedV3 must only be called for cancun payloads"))
 		}
 	}
-	// TODO(matt): the spec requires that fcu is applied when called on a valid
-	// hash, even if params are wrong. To do this we need to split up
-	// forkchoiceUpdate into a function that only updates the head and then a
-	// function that kicks off block construction.
 	return api.forkchoiceUpdated(update, params, engine.PayloadV3, false)
 }
 
@@ -571,7 +567,7 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 	defer api.forkchoiceLock.Unlock()
 
 	block := api.eth.BlockChain().GetBlockByHash(update.HeadBlockHash)
-    //如果
+
 	if block == nil {
 		// If this block was previously invalidated, keep rejecting it here too
 		if res := api.checkInvalidAncestor(update.HeadBlockHash, update.HeadBlockHash); res != nil {
@@ -693,9 +689,8 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 			BeaconRoot:   payloadAttributes.BeaconRoot,
 			Version:      payloadVersion,
 		}
+		//这里的payload id非常重要，执行层可以在共识层调用forkchoiceUpdated->getupload的时间段不断更新区块的具体信息，最终共识层通过payload id来返回执行层打包的区块
 		id := args.Id()
-		// If we already are busy generating this work, then we do not need
-		// to start a second process.
 		if api.localBlocks.has(id) {
 			return valid(&id), nil
 		}
@@ -703,5 +698,379 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 		payload, err := api.eth.Miner().BuildPayload(args, payloadWitness)
 }
 
+// BuildPayload builds the payload according to the provided parameters.
+func (miner *Miner) BuildPayload(args *BuildPayloadArgs, witness bool) (*Payload, error) {
+	return miner.buildPayload(args, witness)
+}
+
+// buildPayload builds the payload according to the provided parameters.
+func (miner *Miner) buildPayload(args *BuildPayloadArgs, witness bool) (*Payload, error) {
+	// Build the initial version with no transaction included. It should be fast
+	// enough to run. The empty payload can at least make sure there is something
+	// to deliver for not missing slot.
+	emptyParams := &generateParams{
+		timestamp:   args.Timestamp,
+		forceTime:   true,
+		parentHash:  args.Parent,
+		//代表这笔交易如果被最终确认后谁会接收到transaction fee奖励
+		coinbase:    args.FeeRecipient,
+		random:      args.Random,
+		withdrawals: args.Withdrawals,
+		beaconRoot:  args.BeaconRoot,
+		noTxs:       true,
+	}
+	//这里在第一次generateWork的时候不会去实际操作交易池来构建区块里面的具体内容，只是初始化payload的基本信息
+	//构建区块里面的具体内容是由下面的协程去做的
+	empty := miner.generateWork(emptyParams, witness)
+	if empty.err != nil {
+		return nil, empty.err
+	}
+	//这里底层的数据通过协程不断更新
+	payload := newPayload(empty.block, empty.requests, empty.witness, args.Id())
+
+	go func() {
+		timer := time.NewTimer(0)
+		defer timer.Stop()
+
+		//在ethereum中，每个slot的时间为12s，每个slot会产生一个区块，如果提议者被选举后没有将自己的区块在12秒内广播和达成共识
+		//那么视为放弃此轮提议，这里有一点在solana基于的poh的共识优化，对于每个epoch，也就是32个slot中，每个slot是顺序执行的，
+		//因为在上一个区块没有产生之前无法预知办法拿到hash来构建下一个区块。
+		endTimer := time.NewTimer(time.Second * 12)
+
+		fullParams := &generateParams{
+			timestamp:  args.Timestamp,
+			forceTime:  true,
+			//父区块hash
+			parentHash: args.Parent,
+			//矿工的tranasction fee奖励
+			coinbase: args.FeeRecipient,
+			random:   args.Random,
+			//需要退回质押的eth的地址
+			withdrawals: args.Withdrawals,
+			//这里的beacon hash root由信标链提供
+			beaconRoot: args.BeaconRoot,
+			noTxs:      false,
+		}
+		//这里的设计是为了保证矿工的最大权利，他会在正式提案前在每次miner.config.Recommit时间内不断地去调整区块里面的交易来保证
+		//自身能够获得的fee更大
+		for {
+			select {
+			case <-timer.C:
+				start := time.Now()
+				r := miner.generateWork(fullParams, witness)
+				if r.err == nil {
+					payload.update(r, time.Since(start))
+				} else {
+					log.Info("Error while generating work", "id", payload.id, "err", r.err)
+				}
+				timer.Reset(miner.config.Recommit)
+			case <-payload.stop:
+				log.Info("Stopping work on payload", "id", payload.id, "reason", "delivery")
+				return
+			case <-endTimer.C:
+				log.Info("Stopping work on payload", "id", payload.id, "reason", "timeout")
+				return
+			}
+		}
+	}()
+	return payload, nil
+}
+
+
+// 初始化一个worker来执行一次对区块的封装，这里和后面提出了一个witness的概念是为了解决
+// 轻节点因为无法保留完整的区块链状态的前提下完成对于区块的验证,为交易执行过程提供最小化的状态证明和上下文信息，使得可以在不依赖完整区块链数据的情况下验证交易的正确性并计算最终的状态根（State Root）和收据根（Receipt Root）。
+//其设计目的是优化轻客户端验证、跨链操作或状态证明的效率和资源消耗。
+func (miner *Miner) generateWork(params *generateParams, witness bool) *newPayloadResult {
+	//下面介绍了prepare work的执行流程主要是设置待生成的区块的父区块信息、和legacy gas 和blob gas的费用计算，同时会在世界状态树中写入父区块的hash到历史存储合约，同时写入共识层的hash 到执行层的beacon 合约中.
+	work, err := miner.prepareWork(params, witness)
+	if err != nil {
+		return &newPayloadResult{err: err}
+	}
+	if !params.noTxs {
+		interrupt := new(atomic.Int32)
+		timer := time.AfterFunc(miner.config.Recommit, func() {
+			interrupt.Store(commitInterruptTimeout)
+		})
+		defer timer.Stop()
+
+		err := miner.fillTransactions(interrupt, work)
+		if errors.Is(err, errBlockInterruptedByTimeout) {
+			log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(miner.config.Recommit))
+		}
+	}
+	//通过prepareWork和fillTransactions分别进行区块初始化以及打包，这里会追加一个质押退回的账户信息，通过共识层传入
+	body := types.Body{Transactions: work.txs, Withdrawals: params.withdrawals}
+	allLogs := make([]*types.Log, 0)
+	//将此次交易执行的日志全部放到allLogs,以便后面提取质押的交易(往系统账户中发送交易)
+	for _, r := range work.receipts {
+		allLogs = append(allLogs, r.Logs...)
+	}
+
+	//这里执行层和共识层的通信格式需要遵守eip7685格式包括(存款、提款、质押操作等）
+	var requests [][]byte
+	if miner.chainConfig.IsPrague(work.header.Number, work.header.Time) {
+		//从交易收据树的日志中获取系统存款交易
+		depositRequests, err := core.ParseDepositLogs(allLogs, miner.chainConfig)
+		if err != nil {
+			return &newPayloadResult{err: err}
+		}
+		requests = append(requests, depositRequests)
+		// 退出质押的操作需要共识层和执行层共同确定来保证原子性,首先共识层传给
+		//执行层需要推出的账户信息，执行层通过调用智能合约的方式来完成状态的变更
+		//最后将结果返回给共识层做出最终确定
+		withdrawalRequests := core.ProcessWithdrawalQueue(work.evm)
+		requests = append(requests, withdrawalRequests)
+		// EIP-7251主要的优势是为了集中当前的质押者数量，在eip7251之前，
+		//一个地址最多质押32个eth来参与共识，大型质押者可能会通过多个账号来质押来保证网络权益的同时获得奖励。eip7251将质押的eth最大值从32变为2048
+		consolidationRequests := core.ProcessConsolidationQueue(work.evm)
+		requests = append(requests, consolidationRequests)
+	}
+	//计算requests的hash
+	if requests != nil {
+		reqHash := types.CalcRequestsHash(requests)
+		work.header.RequestsHash = &reqHash
+	}
+	//生成verkle tree,增加质押退出者的余额，生成最终的block
+	block, err := miner.engine.FinalizeAndAssemble(miner.chain, work.header, work.state, &body, work.receipts)
+	if err != nil {
+		return &newPayloadResult{err: err}
+	}
+	return &newPayloadResult{
+		block:    block,
+		fees:     totalFees(block, work.receipts),
+		sidecars: work.sidecars,
+		stateDB:  work.state,
+		receipts: work.receipts,
+		requests: requests,
+		witness:  work.witness,
+	}
+}
+
+func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*environment, error) {
+	miner.confMu.RLock()
+	defer miner.confMu.RUnlock()
+
+	//获取当前执行层的最新区块
+	parent := miner.chain.CurrentBlock()
+	//如果共识层传入了指定父区块的hash，那么执行层需要确认这个区块是否在当前的系统中
+	if genParams.parentHash != (common.Hash{}) {
+		block := miner.chain.GetBlockByHash(genParams.parentHash)
+		if block == nil {
+			return nil, errors.New("missing parent")
+		}
+		parent = block.Header()
+	}
+	// 这里是为了确认共识层给出的打包区块的参数是否合理。
+	timestamp := genParams.timestamp
+	if parent.Time >= timestamp {
+		if genParams.forceTime {
+			return nil, fmt.Errorf("invalid timestamp, parent %d given %d", parent.Time, timestamp)
+		}
+		timestamp = parent.Time + 1
+	}
+	// 初始化当前矿工打包的区块的状态
+	header := &types.Header{
+		ParentHash: parent.Hash(),
+		Number:     new(big.Int).Add(parent.Number, common.Big1),
+		//初始化当前的区块链的gas limit，这里的gas limit通过上一个区块的gas limit动态调整，最多的震动幅度不能超过上一个gas limit/1024
+		//同时最终的gas limit不能超过矿工协定的gas_ceil,为30_000_000
+		//在tip1559之后，gas 的费用通过上一个区块的gas_used和gas_target进行动态调整。
+		//目的是为了通过调整gas target来动态调控base fee
+		//在eip1559之后，gas的上限由区块链当前的市场状态进行动态扩容，
+		//这可以防止最初矿工通过手动设置gas limit来损失网络的公平性和短期获利，通过反应当前市场的真实情况来动态调控gas basefee
+		GasLimit:   core.CalcGasLimit(parent.GasLimit, miner.config.GasCeil),
+		Time:       timestamp,
+		Coinbase:   genParams.coinbase,
+	}
+	//用于协议扩展
+	if len(miner.config.ExtraData) != 0 {
+		header.Extra = miner.config.ExtraData
+	}
+	//作为 PoW 挖矿算法（Ethash）的核心字段，存储工作量证明的随机数摘要（即 mixHash），与 Nonce 共同验证区块的有效性。
+	//在 PoS 中，MixDigest 被重新利用为 Random 字段，存储来自信标链的随机数（由 RANDAO + VDF 生成），用于支持协议层的随机性需求（如分片分配、验证者选举）。
+	//EIP-4399 明确将其定义为信标链提供的随机数（parent_beacon_block_root）
+	if genParams.random != (common.Hash{}) {
+		header.MixDigest = genParams.random
+	}
+	if miner.chainConfig.IsLondon(header.Number) {
+		//通过parent的gas target和gas used计算当前区块的base fee
+		header.BaseFee = eip1559.CalcBaseFee(miner.chainConfig, parent)
+		//兼容旧区块的 Gas Limit 机制。父区块未启用 EIP-1559：其 Gas Limit 是固定值（如 15M Gas）
+		if !miner.chainConfig.IsLondon(parent.Number) {
+			parentGasLimit := parent.GasLimit * miner.chainConfig.ElasticityMultiplier()
+			header.GasLimit = core.CalcGasLimit(parentGasLimit, miner.config.GasCeil)
+		}
+	}
+	// 在ethereum中，总共出现过三个共识、pow、poa、pos,当前我们只讲pos
+	//在pos中prepare并没有做特别做特别的一些操作，主要是为了兼容pow，如果当前区块ttd
+	//没有达到目标阈值，则仍然延续旧的共识机制。
+	//TTD:全网累计的 总难度（Total Difficulty）阈值，由社区预先设定（如以太坊主网的 TTD 值为 58750000000000000000000）
+	//使用总难度作为pow转化为pos的标准的原因:总难度是全网算力的累积结果，攻击者无法通过短时间集中算力大幅改变其增长趋势,总难度是一个 严格单调递增的数值，每个区块的难度值基于前序区块计算得出，确保所有节点对当前状态达成共识
+	//TTD 允许节点根据本地计算的总难度自主切换，无需依赖中心化预言机或硬编码切换时间。
+	if err := miner.engine.Prepare(miner.chain, header); err != nil {
+		log.Error("Failed to prepare header for sealing", "err", err)
+		return nil, err
+	}
+	//这里负责计算启用eip4844后对于 blob gas费用的计算,在eip4844协议中，max blob数量为6个,
+	//但是ethereum希望target blob的数量保持在3个左右,超过或减少会造成gas费用的波动
+	//在ethereum后续提案中将max blob调整为9个，同时将target blob的数量调整为6个,
+	//不仅如此,他通过调整calldata的单价来鼓励layer2尽快使用blob来存储数据
+	//这个升级集中在25年的布拉格升级
+	if miner.chainConfig.IsCancun(header.Number, header.Time) {
+		var excessBlobGas uint64
+		if miner.chainConfig.IsCancun(parent.Number, parent.Time) {
+			excessBlobGas = eip4844.CalcExcessBlobGas(*parent.ExcessBlobGas, *parent.BlobGasUsed)
+		} else {
+			// For the first post-fork block, both parent.data_gas_used and parent.excess_data_gas are evaluated as 0
+			excessBlobGas = eip4844.CalcExcessBlobGas(0, 0)
+		}
+		header.BlobGasUsed = new(uint64)
+		header.ExcessBlobGas = &excessBlobGas
+		header.ParentBeaconRoot = genParams.beaconRoot
+	}
+	// 这里主要是为了获取父区块的世界状态树以及生成状态验证用于简化节点的区块验证
+	env, err := miner.makeEnv(parent, header, genParams.coinbase, witness)
+	if err != nil {
+		log.Error("Failed to create sealing context", "err", err)
+		return nil, err
+	}
+	//此函数是 EIP-4788 的核心实现模块，用于将 信标链区块根（Beacon Block Root） 写入预编译合约，使智能合约能够访问共识层（信标链）的数据。这是以太坊合并（The Merge）后实现执行层（Execution Layer）与共识层（Consensus Layer）深度交互的关键机制。
+	//主要用于layer2 的合约中设置精密的时间锁
+	if header.ParentBeaconRoot != nil {
+		core.ProcessBeaconBlockRoot(*header.ParentBeaconRoot, env.evm)
+	}
+	//这里将当前父区块的hash存放在历史存储合约中
+	//历史存储合约是 由 EIP-2935 提出的一个预编译合约，其核心功能是 存储和提供对历史区块哈希的访问，突破以太坊原生 BLOCKHASH 操作码只能访问最近 256 个区块的限制。这里的改进主要是为了layer2的欺诈证明和跨链桥历史验证和去中心化随机数生成
+	if miner.chainConfig.IsPrague(header.Number, header.Time) {
+		core.ProcessParentBlockHash(header.ParentHash, env.evm)
+	}
+	return env, nil
+}
+
+// 从交易池里面填充交易来组成当前的区块体
+func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) error {
+	miner.confMu.RLock()
+	tip := miner.config.GasPrice
+	miner.confMu.RUnlock()
+
+	// 组成过滤pending最低gas price的过滤器
+	filter := txpool.PendingFilter{
+		MinTip: uint256.MustFromBig(tip),
+	}
+	if env.header.BaseFee != nil {
+		filter.BaseFee = uint256.MustFromBig(env.header.BaseFee)
+	}
+	if env.header.ExcessBlobGas != nil {
+		filter.BlobFee = uint256.MustFromBig(eip4844.CalcBlobFee(*env.header.ExcessBlobGas))
+	}
+	//这里会从交易池里面提取满足基本gas price的交易
+	filter.OnlyPlainTxs, filter.OnlyBlobTxs = true, false
+	pendingPlainTxs := miner.txpool.Pending(filter)
+
+	filter.OnlyPlainTxs, filter.OnlyBlobTxs = false, true
+	pendingBlobTxs := miner.txpool.Pending(filter)
+	//这里会区分本地交易和远程交易，矿工优先打包本地交易
+	localPlainTxs, remotePlainTxs := make(map[common.Address][]*txpool.LazyTransaction), pendingPlainTxs
+	localBlobTxs, remoteBlobTxs := make(map[common.Address][]*txpool.LazyTransaction), pendingBlobTxs
+
+	for _, account := range miner.txpool.Locals() {
+		if txs := remotePlainTxs[account]; len(txs) > 0 {
+			delete(remotePlainTxs, account)
+			localPlainTxs[account] = txs
+		}
+		if txs := remoteBlobTxs[account]; len(txs) > 0 {
+			delete(remoteBlobTxs, account)
+			localBlobTxs[account] = txs
+		}
+	}
+	// 打包本地blob 和legacy池的交易
+	//此处返回的blobTxs和localPlainsTxs是进行了堆排序的，通过优先级费用和交易发起时间来进行排序，这点应该没有意义，符合eip1557，矿工优先打包高服务费的交易
+	if len(localPlainTxs) > 0 || len(localBlobTxs) > 0 {
+		plainTxs := newTransactionsByPriceAndNonce(env.signer, localPlainTxs, env.header.BaseFee)
+		blobTxs := newTransactionsByPriceAndNonce(env.signer, localBlobTxs, env.header.BaseFee)
+		//这里矿工会通过evm执行的方法验证交易并且更改当前的区块的世界状态树，同时生成交易的收据，如果evm执行失败，并通过快照最终回滚世界状态树的状态,具体的一些情况后续会专门推出一篇章节讲交易是如何执行的，请尽情期待
+		if err := miner.commitTransactions(env, plainTxs, blobTxs, interrupt); err != nil {
+			return err
+		}
+	}
+	//打包远程交易，这里和上面需要注意一点，当header 的gas耗尽时是以错误返回的
+	if len(remotePlainTxs) > 0 || len(remoteBlobTxs) > 0 {
+		plainTxs := newTransactionsByPriceAndNonce(env.signer, remotePlainTxs, env.header.BaseFee)
+		blobTxs := newTransactionsByPriceAndNonce(env.signer, remoteBlobTxs, env.header.BaseFee)
+
+		if err := miner.commitTransactions(env, plainTxs, blobTxs, interrupt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 ```
+
+我们很容易的发现,将交易打包到区块中主要的是通过fillTransactions来实现的，这里面包含很多复杂的eip提案来保证ethereum网络的安全性和稳定性。下面我给大家初步例举了一个流程图来表示ethereum交易打包成区块的具体过程。
+
+从技术角度讲,我个人觉得有一些可以深耕的点。
++  verkle树的生成:[consensus/beacon/consensus.go](https://github.com/0xdoomxy/go-ethereum/blob/master/consensus/beacon/consensus.go)中的FinalizeAndAssemble方法
++ 共识层和执行层如何保证原子性的存款、提款、质押操作等。
++ statedb的实现
+
+上述源码涉及到的EIP协议如下
+
++ EIP-1559:重构 Gas 费用市场，引入基础费用（Base Fee）动态调整机制，销毁部分交易费用，优化网络拥堵管理。
+
++ EIP-2935:通过历史存储合约（预编译合约）保存超过 256 个区块的历史哈希，解决 BLOCKHASH 操作码的访问限制。
+
++ EIP-4399:重新定义区块头 MixDigest 字段为信标链提供的随机数（RANDAO + VDF），支持协议层随机性需求。
+
++ EIP-4788:将信标链区块根写入执行层合约，实现执行层智能合约访问共识层数据（如时隙信息、验证者状态）。
+
++ EIP-4844:引入 Blob 交易类型（Proto-Danksharding），为 Layer2 提供低成本数据可用性存储，优化 Rollup 扩展性。
+
++ EIP-4895:支持信标链验证者提款到执行层，定义提款队列处理机制，实现质押 ETH 的赎回流程。
+
++ EIP-7002:允许通过执行层智能合约触发验证者退出质押，实现质押退出的去中心化控制。
+
++ EIP-7251:提升单个验证者的最大有效余额至 2048 ETH，支持验证者合并（Consolidation），减少节点运营复杂度。
++ EIP-7685:标准化跨层请求格式（存款、提款、质押操作），统一执行层与共识层的通信协议。
++ EIP-3675:以太坊合并（The Merge）的正式规范，定义 PoW 到 PoS 的过渡逻辑，包括 TTD 验证和共识引擎切换。
+
+
+
+```mermaid
+graph TD
+    A[启动] --> B["**forkchoiceUpdated 处理**<br>接收共识层分叉选择指令"]
+    B --> C{"区块是否已知？<br>GetBlockByHash(update.HeadBlockHash)"}
+    C -->|否| D["**触发 Beacon 同步**<br>Downloader.BeaconSync(header, finalized)"]
+    C -->|是| E["**TTD 验证**<br>td.Cmp(ttd) >= 0 ?"]
+    E --> F{"是否 PoS 区块？<br>block.Difficulty().BitLen() == 0"}
+    F -->|否| G["**调用 PoW 流程**<br>ethone.FinalizeAndAssemble"]
+    F -->|是| H["**处理最终化区块**<br>SetFinalized(finalBlock.Header())"]
+    H --> I{"存在负载参数？<br>payloadAttributes != nil"}
+    I -->|是| J["**初始化空负载**<br>generateWork(noTxs=true)"]
+    J --> K["**启动后台优化协程**<br>go func(){持续优化交易组合}"]
+    K --> L["**prepareWork 准备**<br>设置区块头参数"]
+    L --> M["**处理 EIP-4788**<br>ProcessBeaconBlockRoot()"]
+    M --> N["**处理 EIP-2935**<br>ProcessParentBlockHash()"]
+    N --> O["**fillTransactions 填充**<br>txpool.Pending(filter)"]
+    O --> P["**本地交易优先**<br>miner.txpool.Locals()"]
+    P --> Q["**按 GasPrice 排序**<br>newTransactionsByPriceAndNonce()"]
+    Q --> R["**提交交易验证**<br>commitTransactions(env, txs)"]
+    R --> S["**生成中间状态**<br>work.state.IntermediateRoot()"]
+    S --> T["**处理 EIP-7251**<br>ProcessConsolidationQueue()"]
+    T --> U["**FinalizeAndAssemble**<br>计算三态Merkle根"]
+    U --> V["**附加 Verkle 证明**<br>block.WithWitness()"]
+    V --> W["**输出最终区块**<br>types.NewBlock()"]
+
+    style A fill:#FFD700,stroke:#333
+    style B fill:#87CEEB,stroke:#333
+    style D fill:#FFA07A,stroke:#333
+    style J fill:#98FB98,stroke:#333
+    style L fill:#FFB6C1,stroke:#333
+    style O fill:#DDA0DD,stroke:#333
+    style U fill:#20B2AA,stroke:#333
+    style W fill:#7B68EE,stroke:#333
+
+```
+
+
+当然其中另外的commitTransactions包含了实际交易通过evm执行的具体流程，这个我会在下一章讲到,如果大家感兴趣的话请关注[https://github.com/0xdoomxy/web3](https://github.com/0xdoomxy/web3)仓库，会准时同步最新的ethereum源码分析😊
 
