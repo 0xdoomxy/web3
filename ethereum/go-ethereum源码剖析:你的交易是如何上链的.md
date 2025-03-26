@@ -1,6 +1,7 @@
 # go-ethereum源码剖析:你的交易是如何上链的
 
-> 前文我们讲到geth会通过会通过反射注册各个接口来供给外部访问,这些接口包含了区块链基础设施供应商例如ankr、alchemy、infura等支持的ethereum访问的基础rpc方法(当然，不排除会通过扩展geth来向用户提供更多方法)。一般的基于ethereum的layer2 例如optimism都依赖于geth client。
+
+> 源码版本:https://github.com/0xdoomxy/go-ethereum 前文我们讲到geth会通过会通过反射注册各个接口来供给外部访问,这些接口包含了区块链基础设施供应商例如ankr、alchemy、infura等支持的ethereum访问的基础rpc方法(当然，不排除会通过扩展geth来向用户提供更多方法)。一般的基于ethereum的layer2 例如optimism都依赖于geth client。
 
 在绝大多数用户访问区块链网络的媒介都是通过钱包，从最初的metamask到现在的okx wallet、phantom以及更多类型的evm系钱包都是通过与区块链系统的rpc接口进行交互和联系，其中讨论的最多的可能就是如何向以太坊网络发送一笔交易。
 
@@ -34,25 +35,19 @@ type TransactionArgs struct {
     //防止重放攻击
     Nonce *hexutil.Uint64 `json:"nonce"`
 
-    // We accept "data" and "input" for backwards-compatibility reasons.
-    // "input" is the newer name and should be preferred by clients.
-    // Issue detail: https://github.com/ethereum/go-ethereum/issues/15628
     //Data 是旧版字段，Input 是新版字段，二者等效
     Data  *hexutil.Bytes `json:"data"`
     Input *hexutil.Bytes `json:"input"`
 
-    // Introduced by AccessListTxType transaction.
     //在以太坊中，访问storage状态是需要消费巨量gas的，在eip150以及eip1884的提案下，sload的成本从50->800,在图灵完备的evm中，因为逻辑的不同可能会导致gas费难以预测，accesslist相当于cache的作用
     //在执行交易前告诉ethereum需要频繁访问的地址，以免sload导致的巨量gas而造成over gas limit的交易存在
     AccessList *types.AccessList `json:"accessList,omitempty"`
     ChainID    *hexutil.Big      `json:"chainId,omitempty"`
 
-    // For BlobTxType
     // blob类交易主要是为了ethereum layer2进行扩展。在没有eip4844之前,layer2方案是将数据存储在calldata中,但是这个方案因为gas limit的存在导致layer2一次性不能向ethereum发送太多数据。这未能释放layer2的全部潜力
     BlobFeeCap *hexutil.Big  `json:"maxFeePerBlobGas"`
     BlobHashes []common.Hash `json:"blobVersionedHashes,omitempty"`
 
-    // For BlobTxType transactions with blob sidecar
     //单笔blob交易能够携带1-4个blob每个blob的容量为125kb，大约131072个字节
     // blob对于每字节消耗的gas有单独的计算规则，大约是1gas/字节，成本平均比calldata的方式下降16倍。同时blob数据仅在full node中保留4096个epoch，大约18天
     Blobs       []kzg4844.Blob       `json:"blobs"`
@@ -60,7 +55,6 @@ type TransactionArgs struct {
     Commitments []kzg4844.Commitment `json:"commitments"`
     Proofs      []kzg4844.Proof      `json:"proofs"`
 
-    // This configures whether blobs are allowed to be passed.
     //因为blob数据的分发会影响网络带宽，为保证p2p网络的安全性，blob数据并不直接写入区块，而是通过节点p2p网络进行分发
     blobSidecarAllowed bool
 }
@@ -70,8 +64,7 @@ type TransactionArgs struct {
 
 ```go
 
-// SendTransaction creates a transaction for the given argument, sign it and submit it to the
-// transaction pool.
+
 func (api *TransactionAPI) SendTransaction(ctx context.Context, args TransactionArgs) (common.Hash, error) {
     // 这种方式会验证交易发送者是否在本地的account manager并且已经解锁
     account := accounts.Account{Address: args.from()}
@@ -110,23 +103,22 @@ func (api *TransactionAPI) SendTransaction(ctx context.Context, args Transaction
 
 ```go
 
-// SubmitTransaction is a helper function that submits tx to txPool and logs a message.
+
 func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (common.Hash, error) {
-    // If the transaction fee cap is already specified, ensure the
-    // fee of the given transaction is _reasonable_.
+
     if err := checkTxFee(tx.GasPrice(), tx.Gas(), b.RPCTxFeeCap()); err != nil {
         return common.Hash{}, err
     }
     //这里需要注明，在eip155中，为了防止不同链上的重放攻击，将签名的数据从(nonce, gasprice, startgas, to, value, data)设置为(nonce, gasprice, startgas, to, value, data, chainid, 0, 0)
     if !b.UnprotectedAllowed() && !tx.Protected() {
-        // Ensure only eip155 signed transactions are submitted if EIP155Required is set.
+
         return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
     }
     //正式向交易池里面推送交易
     if err := b.SendTx(ctx, tx); err != nil {
         return common.Hash{}, err
     }
-    // Print a log with full tx details for manual investigations and interventions
+ 
     head := b.CurrentBlock()
     signer := types.MakeSigner(b.ChainConfig(), head.Number, head.Time)
     from, err := types.Sender(signer, tx)
@@ -160,7 +152,6 @@ func (p *TxPool) Add(txs []*types.Transaction, local bool, sync bool) []error {
     splits := make([]int, len(txs))
 
     for i, tx := range txs {
-        // Mark this transaction belonging to no-subpool
         splits[i] = -1
 
         // Try to find a subpool that accepts the transaction
@@ -174,8 +165,7 @@ func (p *TxPool) Add(txs []*types.Transaction, local bool, sync bool) []error {
             }
         }
     }
-    // Add the transactions split apart to the individual subpools and piece
-    // back the errors into the original sort order.
+
     //将交易放入对应的transaction pool
     errsets := make([][]error, len(p.subpools))
     for i := 0; i < len(p.subpools); i++ {
@@ -183,12 +173,12 @@ func (p *TxPool) Add(txs []*types.Transaction, local bool, sync bool) []error {
     }
     errs := make([]error, len(txs))
     for i, split := range splits {
-        // If the transaction was rejected by all subpools, mark it unsupported
+
         if split == -1 {
             errs[i] = fmt.Errorf("%w: received type %d", core.ErrTxTypeNotSupported, txs[i].Type())
             continue
         }
-        // Find which subpool handled it and pull in the corresponding error
+
         errs[i] = errsets[split][0]
         errsets[split] = errsets[split][1:]
     }
@@ -203,22 +193,17 @@ func (p *TxPool) Add(txs []*types.Transaction, local bool, sync bool) []error {
 func (pool *LegacyPool) Add(txs []*types.Transaction, local, sync bool) []error {
     local = local && !pool.config.NoLocals
 
-    // Filter out known ones without obtaining the pool lock or recovering signatures
     var (
         errs = make([]error, len(txs))
         news = make([]*types.Transaction, 0, len(txs))
     )
     for i, tx := range txs {
-        // If the transaction is known, pre-set the error slot
         //根据交易hash判定该交易是否已经存在交易池，如果存在，那么会执行返回ErrAlreadyKnown错误。
         if pool.all.Get(tx.Hash()) != nil {
             errs[i] = txpool.ErrAlreadyKnown
             knownTxMeter.Mark(1)
             continue
         }
-        // Exclude transactions with basic errors, e.g invalid signatures and
-        // insufficient intrinsic gas as soon as possible and cache senders
-        // in transactions before obtaining lock
         //验证交易是否基本有效,这里会检查签名是否正确，同时交易类型是否被当前ethereum版本支持。同时初步预测当前账户余额是否足够支付gas费，我个人认为大家可以去阅读一下IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation, isHomestead, isEIP2028, isEIP3860 bool)方法，这个方法初步表达了gas费随input data大小的变化，值得关注的是，对于input零值和非零值的gas费是由巨大差别的，在eip2028之后，非零值为每字节16gas，零值为4gas。同时创建合约的交易基础费为53000，而普通交易为21000。对于eip3860,限制了init contract code的长度以及增添额外的费用
         if err := pool.validateTxBasics(tx, local); err != nil {
             errs[i] = err
@@ -226,14 +211,11 @@ func (pool *LegacyPool) Add(txs []*types.Transaction, local, sync bool) []error 
             invalidTxMeter.Mark(1)
             continue
         }
-        // Accumulate all unknown transactions for deeper processing
         news = append(news, tx)
     }
     if len(news) == 0 {
         return errs
     }
-
-    // Process all the new transaction and merge any errors into the original slice
     pool.mu.Lock()
     newErrs, dirtyAddrs := pool.addTxsLocked(news, local)
     pool.mu.Unlock()
@@ -270,15 +252,12 @@ func (pool *LegacyPool) addTxsLocked(txs []*types.Transaction, local bool) ([]er
 
 
 func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, err error) {
-    // If the transaction is already known, discard it
     hash := tx.Hash()
     if pool.all.Get(hash) != nil {
         log.Trace("Discarding already known transaction", "hash", hash)
         knownTxMeter.Mark(1)
         return false, txpool.ErrAlreadyKnown
     }
-    // Make the local flag. If it's from local source or it's from the network but
-    // the sender is marked as local previously, treat it as the local transaction.
     isLocal := local || pool.locals.containsTx(tx)
 
     //这里主要是根据当前全节点的世界状态树来排查nonce是否合理同时检查当前交易用户的余额是否能够支撑目前pending队列里面的所有交易的gas费用，以及限定每个用户最多只能在交易池里面存在64笔待上链的消息。
@@ -290,8 +269,6 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
     //获取交易发送者地址 
     from, _ := types.Sender(pool.signer, tx)
 
-    // If the address is not yet known, request exclusivity to track the account
-    // only by this subpool until all transactions are evicted
     var (
         _, hasPending = pool.pending[from]
         _, hasQueued  = pool.queue[from]
@@ -302,12 +279,6 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
             return false, err
         }
         defer func() {
-            // If the transaction is rejected by some post-validation check, remove
-            // the lock on the reservation set.
-            //
-            // Note, `err` here is the named error return, which will be initialized
-            // by a return statement before running deferred methods. Take care with
-            // removing or subscoping err as it will break this clause.
             if err != nil {
                 pool.reserve(from, false)
             }
@@ -326,10 +297,6 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
             return false, txpool.ErrUnderpriced
         }
 
-        // We're about to replace a transaction. The reorg does a more thorough
-        // analysis of what to remove and how, but it runs async. We don't want to
-        // do too many replacements between reorg-runs, so we cap the number of
-        // replacements to 25% of the slots
         //这里是transaction pool或者p2p系统中比较重要的一个概念:重组
 		// 对于区块链这个混沌系统中，在架构的过程中，共识并不是严格意义上的有序进行的，它需要通过各种意义的严格规则，这里主要是共识算法决定的
 		//从bitcoin的pow到eth的pow+pos到最后的pos。每个节点在达成共识的过程中可能会走向部分错误的道路，这个时候需要重组来维持最长共识。
@@ -365,7 +332,6 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
                     break
                 }
             }
-            // Add all transactions back to the priced queue
             if replacesPending {
                 for _, dropTx := range drop {
                     pool.priced.Put(dropTx, false)
@@ -381,13 +347,11 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
             underpricedTxMeter.Mark(1)
 
             sender, _ := types.Sender(pool.signer, tx)
-            dropped := pool.removeTx(tx.Hash(), false, sender != from) // Don't unreserve the sender of the tx being added if last from the acc
+            dropped := pool.removeTx(tx.Hash(), false, sender != from) 
 
             pool.changesSinceReorg += dropped
         }
     }
-
-    // Try to replace an existing transaction in the pending pool
     if list := pool.pending[from]; list != nil && list.Contains(tx.Nonce()) {
         // 当这笔交易已经在pending交易池里面有相同nonce的交易时，必须要付出更多的代价才能替换掉原来的这笔pending交易
         //下面为替换的具体逻辑，就是更新pool对老交易的相关索引
@@ -407,8 +371,6 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
         pool.journalTx(from, tx)
         pool.queueTxEvent(tx)
         log.Trace("Pooled new executable transaction", "hash", hash, "from", from, "to", tx.To())
-
-        // Successful promotion, bump the heartbeat
         pool.beats[from] = time.Now()
         return old != nil, nil
     }
@@ -417,11 +379,10 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
     if err != nil {
         return false, err
     }
-    // Mark local addresses and journal local transactions
     if local && !pool.locals.contains(from) {
         log.Info("Setting new local account", "address", from)
         pool.locals.add(from)
-        pool.priced.Removed(pool.all.RemoteToLocals(pool.locals)) // Migrate the remotes if it's marked as local first time.
+        pool.priced.Removed(pool.all.RemoteToLocals(pool.locals))
     }
     if isLocal {
         localGauge.Inc(1)
@@ -450,7 +411,6 @@ ethereum共识层在进行共识的时候,"矿工"需要在pending队列里面�
 ```go
 
 if ctx.IsSet(utils.DeveloperFlag.Name) {
-		// Start dev mode.
 		simBeacon, err := catalyst.NewSimulatedBeacon(ctx.Uint64(utils.DeveloperPeriodFlag.Name), eth)
 		if err != nil {
 			utils.Fatalf("failed to register dev mode catalyst service: %v", err)
@@ -458,14 +418,12 @@ if ctx.IsSet(utils.DeveloperFlag.Name) {
 		catalyst.RegisterSimulatedBeaconAPIs(stack, simBeacon)
 		stack.RegisterLifecycle(simBeacon)
 	} else if ctx.IsSet(utils.BeaconApiFlag.Name) {
-		// Start blsync mode.
 		srv := rpc.NewServer()
 		srv.RegisterName("engine", catalyst.NewConsensusAPI(eth))
 		blsyncer := blsync.NewClient(utils.MakeBeaconLightConfig(ctx))
 		blsyncer.SetEngineRPC(rpc.DialInProc(srv))
 		stack.RegisterLifecycle(blsyncer)
 	} else {
-		// Launch the engine API for interacting with external consensus client.
 		err := catalyst.Register(stack, eth)
 		if err != nil {
 			utils.Fatalf("failed to register catalyst service: %v", err)
@@ -542,8 +500,6 @@ sequenceDiagram
 
 
 ```go
-// ForkchoiceUpdatedV3 is equivalent to V2 with the addition of parent beacon block root
-// in the payload attributes. It supports only PayloadAttributesV3.
 func (api *ConsensusAPI) ForkchoiceUpdatedV3(update engine.ForkchoiceStateV1, params *engine.PayloadAttributes) (engine.ForkChoiceResponse, error) {
 	if params != nil {
         //eip7002
@@ -569,24 +525,15 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 	block := api.eth.BlockChain().GetBlockByHash(update.HeadBlockHash)
 
 	if block == nil {
-		// If this block was previously invalidated, keep rejecting it here too
 		if res := api.checkInvalidAncestor(update.HeadBlockHash, update.HeadBlockHash); res != nil {
 			return engine.ForkChoiceResponse{PayloadStatus: *res, PayloadID: nil}, nil
 		}
-		// If the head hash is unknown (was not given to us in a newPayload request),
-		// we cannot resolve the header, so not much to do. This could be extended in
-		// the future to resolve from the `eth` network, but it's an unexpected case
-		// that should be fixed, not papered over.
 		header := api.remoteBlocks.get(update.HeadBlockHash)
 		if header == nil {
 			log.Warn("Forkchoice requested unknown head", "hash", update.HeadBlockHash)
 			return engine.STATUS_SYNCING, nil
 		}
-		// If the finalized hash is known, we can direct the downloader to move
-		// potentially more data to the freezer from the get go.
 		finalized := api.remoteBlocks.get(update.FinalizedBlockHash)
-
-		// Header advertised via a past newPayload request. Start syncing to it.
 		context := []interface{}{"number", header.Number, "hash", header.Hash()}
 		if update.FinalizedBlockHash != (common.Hash{}) {
 			if finalized == nil {
@@ -601,8 +548,6 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 		}
 		return engine.STATUS_SYNCING, nil
 	}
-	// Block is known locally, just sanity check that the beacon client does not
-	// attempt to push us back to before the merge.
 	if block.Difficulty().BitLen() > 0 || block.NumberU64() == 0 {
 		var (
 			td  = api.eth.BlockChain().GetTd(update.HeadBlockHash, block.NumberU64())
@@ -634,12 +579,7 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 			return engine.ForkChoiceResponse{PayloadStatus: engine.PayloadStatusV1{Status: engine.INVALID, LatestValidHash: &latestValid}}, err
 		}
 	} else if api.eth.BlockChain().CurrentBlock().Hash() == update.HeadBlockHash {
-		// If the specified head matches with our local head, do nothing and keep
-		// generating the payload. It's a special corner case that a few slots are
-		// missing and we are requested to generate the payload in slot.
 	} else {
-		// If the head block is already in our canonical chain, the beacon client is
-		// probably resyncing. Ignore the update.
 		log.Info("Ignoring beacon update to old head", "number", block.NumberU64(), "hash", update.HeadBlockHash, "age", common.PrettyAge(time.Unix(int64(block.Time()), 0)), "have", api.eth.BlockChain().CurrentBlock().Number)
 		return valid(nil), nil
 	}
@@ -647,7 +587,6 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 
 	// 更新finalized block的状态
 	if update.FinalizedBlockHash != (common.Hash{}) {
-		// If the finalized block is not in our canonical tree, something is wrong
 		finalBlock := api.eth.BlockChain().GetBlockByHash(update.FinalizedBlockHash)
 		if finalBlock == nil {
 			log.Warn("Final block not available in database", "hash", update.FinalizedBlockHash)
@@ -703,11 +642,7 @@ func (miner *Miner) BuildPayload(args *BuildPayloadArgs, witness bool) (*Payload
 	return miner.buildPayload(args, witness)
 }
 
-// buildPayload builds the payload according to the provided parameters.
 func (miner *Miner) buildPayload(args *BuildPayloadArgs, witness bool) (*Payload, error) {
-	// Build the initial version with no transaction included. It should be fast
-	// enough to run. The empty payload can at least make sure there is something
-	// to deliver for not missing slot.
 	emptyParams := &generateParams{
 		timestamp:   args.Timestamp,
 		forceTime:   true,
@@ -921,7 +856,6 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 		if miner.chainConfig.IsCancun(parent.Number, parent.Time) {
 			excessBlobGas = eip4844.CalcExcessBlobGas(*parent.ExcessBlobGas, *parent.BlobGasUsed)
 		} else {
-			// For the first post-fork block, both parent.data_gas_used and parent.excess_data_gas are evaluated as 0
 			excessBlobGas = eip4844.CalcExcessBlobGas(0, 0)
 		}
 		header.BlobGasUsed = new(uint64)
@@ -1073,4 +1007,6 @@ graph TD
 
 
 当然其中另外的commitTransactions包含了实际交易通过evm执行的具体流程，这个我会在下一章讲到,如果大家感兴趣的话请关注[https://github.com/0xdoomxy/web3](https://github.com/0xdoomxy/web3)仓库，会准时同步最新的ethereum源码分析😊
+
+> 如果您觉得有地方有问题,请在https://github.com/0xdoomxy/web3中提交issue,我们共同进步
 
