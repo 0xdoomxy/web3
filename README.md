@@ -10,6 +10,8 @@
 
 ## Ethereum
 
++ [go-ethereum源码剖析:geth启动前的准备](https://github.com/0xdoomxy/web3/blob/main/ethereum/go-ethereum%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90%3Ageth%E7%9A%84%E5%90%AF%E5%8A%A8%E6%B5%81%E7%A8%8B.md)
+
 + [go-ethereum源码剖析:geth的启动流程](https://github.com/0xdoomxy/web3/blob/main/ethereum/go-ethereum%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90%3Ageth%E7%9A%84%E5%90%AF%E5%8A%A8%E6%B5%81%E7%A8%8B.md)
 
 + [go-ethereum源码剖析:你的交易是如何上链的](https://github.com/0xdoomxy/web3/blob/main/ethereum/go-ethereum%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90%3A%E4%BD%A0%E7%9A%84%E4%BA%A4%E6%98%93%E6%98%AF%E5%A6%82%E4%BD%95%E4%B8%8A%E9%93%BE%E7%9A%84.md)
