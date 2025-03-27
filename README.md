@@ -22,7 +22,7 @@
 
 ## 数学
 
-+ [优雅解决多项式乘法:傅立叶快速变换](https://github.com/0xdoomxy/web3/blob/main/coding/cryptography/FFT/go/fft_test.go)
++ [优雅解决多项式乘法:快速傅立叶变换](https://github.com/0xdoomxy/web3/blob/main/coding/cryptography/FFT/go/fft_test.go)
 
 **硬核技术实践场 | 智能合约军火库 | Web3 开发流水线**  
 👉 点击右上角 **Star** ⭐ 持续追踪更新 | 每个 star 都是下一个深度教程的燃料！
