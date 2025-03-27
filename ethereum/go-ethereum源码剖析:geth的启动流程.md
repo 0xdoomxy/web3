@@ -1,7 +1,7 @@
 > 以上为作者从零开始对Ethereum源码进行剖析，在目前绝大多数的资料中，只是对ethereum的架构做了一个科普性的介绍，没有对ethereum的实现做过多阐述。作为开发者而言，了解web3的前提是必须熟悉一条区块链的底层实现，因为他代表了一种P2P的新范式,这与以往web2的开发模式大相径庭，这更多的是一种理念的创新。不管是Ethereum还是Bitcoin或者说是其他的Layer2以及Solana,其最终都会遵守一个最基本的开发理念:去中心化。作者想通过对Ethereum源码的分析来对当前的所有链的底层原理有一个通俗的理解,同时想借用这系列的文章与更多web3的工作者交流技术。[源码版本下载](https://github.com/0xdoomxy/go-ethereum)
 
 
-[go-ethereum源码剖析:geth的启动流程](https://www.0xdoomxy.top/#/article/4) 讲到geth console最终会执行localConsole这个函数，并且附带用户参数的上下文cCtx
+[go-ethereum源码剖析:geth的启动流程]() 讲到geth console最终会执行localConsole这个函数，并且附带用户参数的上下文cCtx
 
 ```go
 
@@ -102,32 +102,32 @@ type Node struct {
 
 <!--EndFragment-->
 
-![start_node](https://github.com/0xdoomxy/web3/blob/main/images/chapter1/start%20node%20function.png)
+![start_node](https://github.com/0xdoomxy/web3/blob/main/images/chapter2/start%20node%20function.png)
 
 <!--EndFragment-->
 
-![base_start_node](https://github.com/0xdoomxy/web3/blob/main/images/chapter1/start%20node%20function%20base.png)
+![base_start_node](https://github.com/0xdoomxy/web3/blob/main/images/chapter2/start%20node%20function%20base.png)
 <!--EndFragment-->
 
-![node_start](https://github.com/0xdoomxy/web3/blob/main/images/chapter1/node%20start.png)
+![node_start](https://github.com/0xdoomxy/web3/blob/main/images/chapter2/node%20start.png)
 
 
 
-
-<!--EndFragment-->
-
-![endpoint](https://github.com/0xdoomxy/web3/blob/main/images/chapter1/endpoint.png)
-<!--EndFragment-->
-
-![start_rpc](https://github.com/0xdoomxy/web3/blob/main/images/chapter1/start%20rpc.png)
 
 <!--EndFragment-->
 
-![enablews](https://github.com/0xdoomxy/web3/blob/main/images/chapter1/enable%20ws.png)
+![endpoint](https://github.com/0xdoomxy/web3/blob/main/images/chapter2/endpoint.png)
+<!--EndFragment-->
+
+![start_rpc](https://github.com/0xdoomxy/web3/blob/main/images/chapter2/start%20rpc.png)
+
+<!--EndFragment-->
+
+![enablews](https://github.com/0xdoomxy/web3/blob/main/images/chapter2/enable%20ws.png)
 
 <!--StartFragment-->
 
-![geth_start过程](https://github.com/0xdoomxy/web3/blob/main/images/chapter1/geth%20start过程.png)
+![geth_start过程](https://github.com/0xdoomxy/web3/blob/main/images/chapter2/geth%20start过程.png)
 
 
 
@@ -618,7 +618,7 @@ func (h *handler) Start(maxPeers int) {
 
 <!--StartFragment-->
 
-![geth结构体](https://github.com/0xdoomxy/web3/blob/main/images/chapter1/geth%E7%BB%93%E6%9E%84%E4%BD%93.png)
+![geth结构体](https://github.com/0xdoomxy/web3/blob/main/images/chapter2/geth%E7%BB%93%E6%9E%84%E4%BD%93.png)
 
 
 总的来说,geth通过makeFullNode和startNode对上述的一些服务进行了初始化以及启动。主要包括p2pNode、blockchain这个复杂的数据结构，以及向外部和内部进程提供的服务servers(**通过反射rpcAPIS的servers里面的公共方法实现注册**),同时通过accountmanager对账户进行管理,后续包括了一个系统必不可少了profile、metrics、trace等相关信息。这里我们没有过多地讲述consensus engine，因为目前很多full node都是通过[第三方的共识模块](https://ethereum.org/zh/developers/docs/nodes-and-clients/run-a-node/#starting-the-consensus-client)来实现POS的。
